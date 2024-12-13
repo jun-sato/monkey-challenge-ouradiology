@@ -1,4 +1,3 @@
-
 'wholeslidedata': {
     'default': {
         'yaml_source': "./configs/training_sample.yml",
@@ -6,14 +5,15 @@
         "image_backend": "asap",
         'labels': {
             "ROI": 0,
-            "lymphocytes": 1
+            "lymphocytes": 1,
+            "monocytes": 2
         },
     
         
         'batch_shape': {
-            'batch_size': 10,
+            'batch_size': 64,
             'spacing': 0.5,
-            'shape': [128,128,3],
+            'shape': [224,224,3],
             'y_shape': [1000, 6],
         },
         
@@ -31,7 +31,7 @@
         'patch_label_sampler_name': 'DetectionPatchLabelSampler',
         'patch_label_sampler': {
             "max_number_objects": 1000,
-            "detection_labels": ['lymphocytes'],
+            "detection_labels": ['lymphocytes','monocytes'],
                 
         },
         

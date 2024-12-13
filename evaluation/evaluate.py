@@ -28,19 +28,18 @@ import numpy as np
 from helpers import run_prediction_processing
 
 # for local debugging
-# import os
-# INPUT_DIRECTORY = Path(f"{os.getcwd()}/test/input")
-# OUTPUT_DIRECTORY = Path(f"{os.getcwd()}/test/output")
-# GROUND_TRUTH_DIRECTORY = Path(f"{os.getcwd()}/ground_truth")
+import os
+INPUT_DIRECTORY = Path(f"/mnt/hdd2/monkey-challenge/evaluation/test/input")
+OUTPUT_DIRECTORY = Path(f"/mnt/hdd2/monkey-challenge/evaluation/test/output")
+GROUND_TRUTH_DIRECTORY = Path(f"/mnt/hdd2/monkey-challenge/evaluation/ground_truth")
 
 # for docker building
-INPUT_DIRECTORY = Path("/input")
-OUTPUT_DIRECTORY = Path("/output")
-GROUND_TRUTH_DIRECTORY = Path("/opt/ml/input/data/ground_truth")
+# INPUT_DIRECTORY = Path("/input")
+# OUTPUT_DIRECTORY = Path("/output")
+# GROUND_TRUTH_DIRECTORY = Path("/opt/ml/input/data/ground_truth")
 
 SPACING_LEVEL0 = 0.24199951445730394
 GT_MM = True
-SHORT_METRICS = False
 
 def process(job):
     """Processes a single algorithm job, looking at the outputs"""
@@ -96,9 +95,9 @@ def process(job):
     gt_inf_cells = load_json_file(location=GROUND_TRUTH_DIRECTORY / f"{file_id}_inflammatory-cells.json")
 
     # compare the results to your ground truth and compute some metrics
-    radius_lymph = int(4 / SPACING_LEVEL0) if GT_MM else 0.004 # margin for lymphocytes is 4um at spacing 0.25 um / pixel
-    radius_mono = int(10 / SPACING_LEVEL0) if GT_MM else 0.01 # margin for monocytes is 10um at spacing 0.25 um / pixel
-    radius_infl = int(7.5 / SPACING_LEVEL0) if GT_MM else 0.0075 # margin for inflammatory cells is 7.5um at spacing 0.24 um / pixel
+    radius_lymph = 0.004 if GT_MM else int(4 / SPACING_LEVEL0) # margin for lymphocytes is 4um at spacing 0.25 um / pixel
+    radius_mono = 0.005 if GT_MM else int(5 / SPACING_LEVEL0) # margin for monocytes is 10um at spacing 0.25 um / pixel
+    radius_infl = 0.005 if GT_MM else int(5 / SPACING_LEVEL0) # margin for inflammatory cells is 7.5um at spacing 0.24 um / pixel
     lymphocytes_froc = get_froc_vals(gt_lymphocytes, result_detected_lymphocytes,
                                      radius=radius_lymph)
     monocytes_froc = get_froc_vals(gt_monocytes, result_detected_monocytes,
@@ -244,7 +243,7 @@ def get_froc_score(fp_probs, tp_probs, total_pos, area_mm2):
 
 
 def main():
-    print_inputs()
+    #print_inputs()
     predictions = read_predictions()
     metrics = {}
 
@@ -270,13 +269,13 @@ def main():
     }
 
     # clean up the per-file metrics
-    if SHORT_METRICS:
-        for file_id, file_metrics in metrics['per_slide'].items():
-            for cell_type in ['lymphocytes', 'monocytes', 'inflammatory-cells']:
-                for i in ['sensitivity_slide', 'fp_per_slide', 'fp_probs_slide', 'tp_probs_slide',
-                          'total_pos_slide']:
-                    if i in file_metrics[cell_type]:
-                        del file_metrics[cell_type][i]
+    for file_id, file_metrics in metrics['per_slide'].items():
+        print(file_id,'lymph froc  ',file_metrics['lymphocytes']['froc_score_slide'])
+        print(file_id,'mono froc  ',file_metrics['monocytes']['froc_score_slide'])
+        for cell_type in ['lymphocytes', 'monocytes', 'inflammatory-cells']:
+            for i in ['fp_probs_slide', 'tp_probs_slide', 'total_pos_slide']:
+                if i in file_metrics[cell_type]:
+                    del file_metrics[cell_type][i]
 
     # Aggregate the metrics_per_slide
     metrics["aggregates"] = aggregated_metrics

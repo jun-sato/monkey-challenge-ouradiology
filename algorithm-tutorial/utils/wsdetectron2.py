@@ -6,7 +6,7 @@ from detectron2 import model_zoo
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 
-SIZE = 128
+SIZE = 224
 AUG = T.FixedSizeCrop((SIZE, SIZE), pad_value=0)
 inv_label_map = {
     0: "lymphocyte",
@@ -56,8 +56,9 @@ class Detectron2DetectionPredictor:
         cfg.DATALOADER.NUM_WORKERS = 1
 
         cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 512
-        cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1
-        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[16, 24, 32]]
+        cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2
+        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[8, 16, 24]]
+        cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[1.0]]
 
         cfg.SOLVER.IMS_PER_BATCH = 10
         cfg.SOLVER.BASE_LR = 0.001  # pick a good LR
@@ -67,40 +68,70 @@ class Detectron2DetectionPredictor:
         cfg.SOLVER.GAMMA = 0.5
         ###
 
-
-
         cfg.OUTPUT_DIR = str(output_dir)
         os.makedirs(output_dir, exist_ok=True)
 
         cfg.MODEL.WEIGHTS = weight_root
-        
-
         cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = threshold
         cfg.MODEL.ROI_HEADS.NMS_THRESH_TEST = nms_threshold
         cfg.MODEL.RPN.NMS_THRESH = nms_threshold
 
         self._predictor = BatchPredictor(cfg)
 
+    # def predict_on_batch(self, x_batch):
+    #     # format is documented at https://detectron2.readthedocs.io/tutorials/models.html#model-output-format
+    #     outputs = self._predictor(x_batch)
+    #     predictions = []
+    #     for output in outputs:
+    #         predictions.append([])
+    #         pred_boxes = output["instances"].get("pred_boxes")
+
+    #         scores = output["instances"].get("scores")
+    #         classes = output["instances"].get("pred_classes")
+    #         centers = pred_boxes.get_centers()
+    #         for idx, center in enumerate(centers):
+    #             x, y = center.cpu().detach().numpy()
+    #             confidence = scores[idx].cpu().detach().numpy()
+    #             label = inv_label_map[int(classes[idx].cpu().detach())]
+                
+    #             # if confidence >= class_thresholds[label]:
+    #             prediction_record = {
+    #                 "x": int(x),
+    #                 "y": int(y),
+    #                 "label": str(label),
+    #                 "confidence": float(confidence),
+    #             }
+    #             predictions[-1].append(prediction_record)
+    #     return predictions
+
+
     def predict_on_batch(self, x_batch):
-        # format is documented at https://detectron2.readthedocs.io/tutorials/models.html#model-output-format
         outputs = self._predictor(x_batch)
         predictions = []
         for output in outputs:
-            predictions.append([])
+            single_image_preds = []
             pred_boxes = output["instances"].get("pred_boxes")
-
             scores = output["instances"].get("scores")
             classes = output["instances"].get("pred_classes")
-            centers = pred_boxes.get_centers()
-            for idx, center in enumerate(centers):
-                x, y = center.cpu().detach().numpy()
+            
+            # get box coordinates (x1,y1,x2,y2)
+            boxes = pred_boxes.tensor.cpu().detach().numpy()
+
+            for idx, box in enumerate(boxes):
+                x1, y1, x2, y2 = box
                 confidence = scores[idx].cpu().detach().numpy()
                 label = inv_label_map[int(classes[idx].cpu().detach())]
+
+                center_x = (x1 + x2) / 2.0
+                center_y = (y1 + y2) / 2.0
+                
                 prediction_record = {
-                    "x": int(x),
-                    "y": int(y),
+                    "x": float(center_x),
+                    "y": float(center_y),
                     "label": str(label),
                     "confidence": float(confidence),
+                    "bbox": [float(x1), float(y1), float(x2), float(y2)]
                 }
-                predictions[-1].append(prediction_record)
+                single_image_preds.append(prediction_record)
+            predictions.append(single_image_preds)
         return predictions
