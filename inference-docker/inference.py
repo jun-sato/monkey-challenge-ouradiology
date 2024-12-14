@@ -51,7 +51,7 @@ def run():
     # Process the inputs: any way you'd like
     _show_torch_cuda_info()
 
-    patch_shape = (128, 128, 3)
+    patch_shape = (224, 224, 3)
     spacings = (0.5,)
     overlap = (0, 0)
     offset = (0, 0)
@@ -66,7 +66,7 @@ def run():
     model = Detectron2DetectionPredictor(
         output_dir=output_path,
         threshold=0.1,
-        nms_threshold=0.3,
+        nms_threshold=0.15,
         weight_root=weight_root
     )
 
@@ -139,7 +139,7 @@ def inference(iterator, predictor, spacing, image_path, output_path, json_filena
         "version": {"major": 1, "minor": 0},
         "points": [],
     }
-
+    class_thresholds={"lymphocyte": 0.4, "monocyte": 0.15}
     annotations = []
     counter = 0
 
@@ -160,9 +160,12 @@ def inference(iterator, predictor, spacing, image_path, output_path, json_filena
 
             for detections in prediction:
                 x, y, label, confidence = detections.values()
-
-                if x == 128 or y == 128:
+                
+                if confidence < class_thresholds[label]:
                     continue
+
+                # if x == 128 or y == 128:
+                #     continue
 
                 if y_batch[idx][y][x] == 0:
                     continue
@@ -178,10 +181,14 @@ def inference(iterator, predictor, spacing, image_path, output_path, json_filena
                     ],
                     "probability": confidence,
                 }
-                output_dict["points"].append(prediction_record)
-                output_dict_monocytes["points"].append(prediction_record)  # should be replaced with detected monocytes
-                output_dict_inflammatory_cells["points"].append(
-                    prediction_record)  # should be replaced with detected inflammatory_cells
+                if label == 'lymphocyte':
+                    output_dict["points"].append(prediction_record)
+                    output_dict_inflammatory_cells["points"].append(prediction_record)
+                elif label == 'monocyte':
+                    output_dict_monocytes["points"].append(prediction_record)
+                    output_dict_inflammatory_cells["points"].append(prediction_record)
+                else:
+                    print('unknown label')
 
                 annotations.append((x, y))
                 counter += 1

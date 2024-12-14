@@ -6,7 +6,7 @@ from detectron2 import model_zoo
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
 
-SIZE = 128
+SIZE = 224
 AUG = T.FixedSizeCrop((SIZE, SIZE), pad_value=0)
 inv_label_map = {
     0: "lymphocyte",
@@ -56,8 +56,9 @@ class Detectron2DetectionPredictor:
         cfg.DATALOADER.NUM_WORKERS = 1
 
         cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 512
-        cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1
-        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[16, 24, 32]]
+        cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2
+        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[8, 16, 24]]
+        cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[1.0]]
 
         cfg.SOLVER.IMS_PER_BATCH = 10
         cfg.SOLVER.BASE_LR = 0.001  # pick a good LR
@@ -65,6 +66,7 @@ class Detectron2DetectionPredictor:
         cfg.SOLVER.STEPS = (10, 100, 250)
         cfg.SOLVER.WARMUP_ITERS = 0
         cfg.SOLVER.GAMMA = 0.5
+        ###
         ###
 
 
