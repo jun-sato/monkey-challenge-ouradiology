@@ -243,7 +243,7 @@ def get_froc_score(fp_probs, tp_probs, total_pos, area_mm2):
 
 
 def main():
-    #print_inputs()
+    print_inputs()
     predictions = read_predictions()
     metrics = {}
 
@@ -270,8 +270,6 @@ def main():
 
     # clean up the per-file metrics
     for file_id, file_metrics in metrics['per_slide'].items():
-        print(file_id,'lymph froc  ',file_metrics['lymphocytes']['froc_score_slide'])
-        print(file_id,'mono froc  ',file_metrics['monocytes']['froc_score_slide'])
         for cell_type in ['lymphocytes', 'monocytes', 'inflammatory-cells']:
             for i in ['fp_probs_slide', 'tp_probs_slide', 'total_pos_slide']:
                 if i in file_metrics[cell_type]:
