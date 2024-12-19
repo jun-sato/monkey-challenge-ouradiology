@@ -1,4 +1,66 @@
 import math
+import numpy as np
+from ensemble_boxes import weighted_boxes_fusion
+
+def augmentation1(image):
+    # Vertical flip
+    # image: (H, W, C)
+    aug_image = np.flipud(image)
+    return aug_image
+
+def augmentation2(image):
+    # Horizontal flip
+    # image: (H, W, C)
+    aug_image = np.fliplr(image)
+    return aug_image
+
+def revert_vertical_flip(predictions, height):
+    """
+    predictions: list[dict] with keys 'x', 'y', 'bbox'
+    bbox: [x1, y1, x2, y2]
+    vertical flipで反転した座標を元に戻す
+    """
+    reverted = []
+    for p in predictions:
+        # y座標を反転前に戻す
+        y_new = (height - 1) - p['y']
+        x_new = p['x']  # xはそのまま
+
+        # bboxも反転戻し
+        x1, y1, x2, y2 = p['bbox']
+        y1_new = (height - 1) - y2
+        y2_new = (height - 1) - y1
+
+        reverted.append({
+            "x": x_new,
+            "y": y_new,
+            "label": p['label'],
+            "confidence": p['confidence'],
+            "bbox": [x1, y1_new, x2, y2_new]
+        })
+    return reverted
+
+def revert_horizontal_flip(predictions, width):
+    """
+    horizontal flipで反転した座標を元に戻す
+    """
+    reverted = []
+    for p in predictions:
+        x_new = (width - 1) - p['x']
+        y_new = p['y']
+
+        x1, y1, x2, y2 = p['bbox']
+        x1_new = (width - 1) - x2
+        x2_new = (width - 1) - x1
+
+        reverted.append({
+            "x": x_new,
+            "y": y_new,
+            "label": p['label'],
+            "confidence": p['confidence'],
+            "bbox": [x1_new, y1, x2_new, y2]
+        })
+    return reverted
 
 def iou(boxA, boxB):
     # box: [x1, y1, x2, y2]
@@ -104,3 +166,57 @@ def average_cluster_iou(cluster):
     }
 
 
+def apply_wbf_to_predictions(predictions, image_width, image_height, iou_thr=0.5, skip_box_thr=0.0001):
+    """
+    predictions: Detectron2の1画像に対する出力結果 (Instancesオブジェクト想定)
+    image_width, image_height: 画像サイズ
+    iou_thr: WBFでのIoU閾値
+    skip_box_thr: 最低スコア閾値
+
+    Returns:
+        wbf_boxes, wbf_scores, wbf_labels
+    """
+
+    # Detectron2のpredictionがInstancesとして返ってくる場合:
+    # boxes: Tensor [N,4] (x1,y1,x2,y2)
+    # scores: Tensor [N]
+    # pred_classes: Tensor [N] (クラスID)
+    boxes = predictions.pred_boxes.tensor.cpu().numpy()  # shape: (N,4)
+    scores = predictions.scores.cpu().numpy()            # shape: (N,)
+    labels = predictions.pred_classes.cpu().numpy()      # shape: (N,)
+
+    # 座標を0~1に正規化
+    boxes_norm = []
+    for box in boxes:
+        x1, y1, x2, y2 = box
+        boxes_norm.append([
+            x1 / image_width,
+            y1 / image_height,
+            x2 / image_width,
+            y2 / image_height
+        ])
+    boxes_norm = [boxes_norm]  # WBFはリストのリストを要求(単一モデルなら1要素のリストに)
+
+    scores_list = [scores.tolist()]
+    labels_list = [labels.tolist()]
+
+    # WBFの実行
+    # weights=Noneは各モデル同等とみなす
+    wbf_boxes, wbf_scores, wbf_labels = weighted_boxes_fusion(
+        boxes_norm, scores_list, labels_list,
+        weights=None,
+        iou_thr=iou_thr,
+        skip_box_thr=skip_box_thr
+    )
+
+    # wbf_boxesは0~1正規化された座標で返ってくるため、元に戻す
+    wbf_boxes_abs = []
+    for (x1, y1, x2, y2) in wbf_boxes:
+        wbf_boxes_abs.append([
+            x1 * image_width,
+            y1 * image_height,
+            x2 * image_width,
+            y2 * image_height
+        ])
+
+    return wbf_boxes_abs, wbf_scores, wbf_labels

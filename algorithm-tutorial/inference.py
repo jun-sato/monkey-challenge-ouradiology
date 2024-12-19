@@ -16,6 +16,7 @@ from wholeslidedata.annotation.labels import Label
 
 from utils.wsdetectron2 import Detectron2DetectionPredictor
 from utils.structures import Point
+from utils.tta import *
 
 print(f"Pytorch GPU available: {torch.cuda.is_available()}")
 
@@ -30,31 +31,25 @@ patch_shapes = [
     (224, 224, 3)
 ]
 overlaps = [
-    (0, 0),
-    (4, 4),
-    (16, 16),
+    # (0, 0),
+    # (4, 4),
+    # (16, 16),
     (8, 8)
 ]
 image_paths = [
     "./data/images/pas-cpg/A_P000002_PAS_CPG.tif",
-    "./data/images/pas-cpg/A_P000003_PAS_CPG.tif",
-    "./data/images/pas-cpg/B_P000001_PAS_CPG.tif",
-    "./data/images/pas-cpg/B_P000002_PAS_CPG.tif",
 ]
 mask_paths = [
     "./data/images/tissue-masks/A_P000002_mask.tif",
-    "./data/images/tissue-masks/A_P000003_mask.tif",
-    "./data/images/tissue-masks/B_P000001_mask.tif",
-    "./data/images/tissue-masks/B_P000002_mask.tif"
 ]
 thresholds = [0.1]     # Detectron2内部のthreshold
-nms_thresholds = [0.15,0.02]  # Detectron2内部のnms_threshold
+nms_thresholds = [0.15]  # Detectron2内部のnms_threshold
 class_thresholds_list = [
-    {"lymphocyte": 0.5, "monocyte": 0.2},
-    {"lymphocyte": 0.4, "monocyte": 0.15},
-    {"lymphocyte": 0.3, "monocyte": 0.1}
+    {"lymphocyte": 0.7, "monocyte": 0.3},
+    # {"lymphocyte": 0.4, "monocyte": 0.15},
+    # {"lymphocyte": 0.3, "monocyte": 0.1}
 ]
-weight_root = "./outputs/model_0001999.pth"
+weight_root = "./outputs/model_0000799.pth"
 
 ##best 128, 0.6,0.25,0.15,(0,0)
 ##best 224, 0.4,0.15,0.15,(8,0)
@@ -109,7 +104,7 @@ def inference(iterator, predictor, spacing, image_path, output_path, json_filena
     with WholeSlideImage(image_path) as wsi:
         spacing = wsi.get_real_spacing(spacing_min)
 
-
+    all_predictions = []  # 全予測結果を入れる
     for x_batch, y_batch, info in tqdm(iterator):
         x_batch = x_batch.squeeze(0)
         y_batch = y_batch.squeeze(0)
@@ -122,18 +117,15 @@ def inference(iterator, predictor, spacing, image_path, output_path, json_filena
 
             for detections in prediction:
                 x, y, label, confidence = detections.values()
-                #print(f'x: {x}, y: {y}, label: {label}, confidence: {confidence}')
+                #print(f'x: {x}, y: {y}, label: {label}, confidence: {confidence},{y_batch[idx].shape}')
                 if confidence < class_thresholds[label]:
                     continue
                 
-                if x == 128 or y == 128:
-                    continue
-
                 if y_batch[idx][y][x] == 0:
                     continue
                 
                 x = x*ratio + c # x is in spacing= 0.5 but c is in spacing = 0.25
-                y= y*ratio + r
+                y = y*ratio + r
                 prediction_record = {
                     "name" : "Point "+str(counter),
                     "point": [
@@ -230,7 +222,7 @@ with open(csv_file, "w", newline="") as csvfile:
 
             patch_configuration = PatchConfiguration(
                 patch_shape=patch_shape,
-                spacings=(0.5,),
+                spacings=(0.25,),
                 overlap=overlap,
                 offset=(0,0),
                 center=False
@@ -254,7 +246,7 @@ with open(csv_file, "w", newline="") as csvfile:
             annotations_count, lymph_count, mono_count, inflam_count = inference(
                 iterator=iterator,
                 predictor=model,
-                spacing = 0.5,
+                spacing = 0.25,
                 image_path=image_path,
                 output_path=output_path,
                 json_filename="detected-lymphocytes.json",

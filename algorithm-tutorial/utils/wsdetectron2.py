@@ -5,6 +5,7 @@ import torch
 from detectron2 import model_zoo
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
+from utils.loss import MyFocalROIHeads 
 
 SIZE = 224
 AUG = T.FixedSizeCrop((SIZE, SIZE), pad_value=0)
@@ -52,21 +53,24 @@ class Detectron2DetectionPredictor:
 
 
         cfg.DATASETS.TRAIN = ("detection_dataset2",)
-        cfg.DATASETS.TEST = ()
-        cfg.DATALOADER.NUM_WORKERS = 1
+        cfg.DATASETS.TEST = () 
+        cfg.TEST.EVAL_PERIOD = 20  # 200イテレーション毎に評価を実施（例）
+        cfg.DATALOADER.NUM_WORKERS = 4
 
         cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 512
         cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2
-        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[8, 16, 24]]
-        cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[1.0]]
+        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[16, 24, 32]]
+        #cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[1.0]]
+        cfg.MODEL.ROI_HEADS.NAME = "MyFocalROIHeads"
 
-        cfg.SOLVER.IMS_PER_BATCH = 10
-        cfg.SOLVER.BASE_LR = 0.001  # pick a good LR
-        cfg.SOLVER.MAX_ITER = 2000  # 2000 iterations seems good enough for this toy dataset; you may need to train longer for a practical dataset
-        cfg.SOLVER.STEPS = (10, 100, 250)
-        cfg.SOLVER.WARMUP_ITERS = 0
+        cfg.SOLVER.IMS_PER_BATCH = 256
+        cfg.SOLVER.BASE_LR = 0.002  # pick a good LR
+        cfg.SOLVER.MAX_ITER = 1000  # 2000 iterations seems good enough for this toy dataset; you may need to train longer for a practical dataset
+        cfg.SOLVER.STEPS = (500, 750)
+        cfg.SOLVER.WARMUP_ITERS = 100
+        cfg.SOLVER.WARMUP_FACTOR = 1.0/1000 
         cfg.SOLVER.GAMMA = 0.5
-        ###
+        cfg.SOLVER.CHECKPOINT_PERIOD = 200
 
         cfg.OUTPUT_DIR = str(output_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -78,60 +82,60 @@ class Detectron2DetectionPredictor:
 
         self._predictor = BatchPredictor(cfg)
 
-    # def predict_on_batch(self, x_batch):
-    #     # format is documented at https://detectron2.readthedocs.io/tutorials/models.html#model-output-format
-    #     outputs = self._predictor(x_batch)
-    #     predictions = []
-    #     for output in outputs:
-    #         predictions.append([])
-    #         pred_boxes = output["instances"].get("pred_boxes")
-
-    #         scores = output["instances"].get("scores")
-    #         classes = output["instances"].get("pred_classes")
-    #         centers = pred_boxes.get_centers()
-    #         for idx, center in enumerate(centers):
-    #             x, y = center.cpu().detach().numpy()
-    #             confidence = scores[idx].cpu().detach().numpy()
-    #             label = inv_label_map[int(classes[idx].cpu().detach())]
-                
-    #             # if confidence >= class_thresholds[label]:
-    #             prediction_record = {
-    #                 "x": int(x),
-    #                 "y": int(y),
-    #                 "label": str(label),
-    #                 "confidence": float(confidence),
-    #             }
-    #             predictions[-1].append(prediction_record)
-    #     return predictions
-
-
     def predict_on_batch(self, x_batch):
+        # format is documented at https://detectron2.readthedocs.io/tutorials/models.html#model-output-format
         outputs = self._predictor(x_batch)
         predictions = []
         for output in outputs:
-            single_image_preds = []
+            predictions.append([])
             pred_boxes = output["instances"].get("pred_boxes")
+
             scores = output["instances"].get("scores")
             classes = output["instances"].get("pred_classes")
-            
-            # get box coordinates (x1,y1,x2,y2)
-            boxes = pred_boxes.tensor.cpu().detach().numpy()
-
-            for idx, box in enumerate(boxes):
-                x1, y1, x2, y2 = box
+            centers = pred_boxes.get_centers()
+            for idx, center in enumerate(centers):
+                x, y = center.cpu().detach().numpy()
                 confidence = scores[idx].cpu().detach().numpy()
                 label = inv_label_map[int(classes[idx].cpu().detach())]
-
-                center_x = (x1 + x2) / 2.0
-                center_y = (y1 + y2) / 2.0
                 
+                # if confidence >= class_thresholds[label]:
                 prediction_record = {
-                    "x": float(center_x),
-                    "y": float(center_y),
+                    "x": int(x),
+                    "y": int(y),
                     "label": str(label),
                     "confidence": float(confidence),
-                    "bbox": [float(x1), float(y1), float(x2), float(y2)]
                 }
-                single_image_preds.append(prediction_record)
-            predictions.append(single_image_preds)
+                predictions[-1].append(prediction_record)
         return predictions
+
+
+    # def predict_on_batch(self, x_batch):
+    #     outputs = self._predictor(x_batch)
+    #     predictions = []
+    #     for output in outputs:
+    #         single_image_preds = []
+    #         pred_boxes = output["instances"].get("pred_boxes")
+    #         scores = output["instances"].get("scores")
+    #         classes = output["instances"].get("pred_classes")
+            
+    #         # get box coordinates (x1,y1,x2,y2)
+    #         boxes = pred_boxes.tensor.cpu().detach().numpy()
+
+    #         for idx, box in enumerate(boxes):
+    #             x1, y1, x2, y2 = box
+    #             confidence = scores[idx].cpu().detach().numpy()
+    #             label = inv_label_map[int(classes[idx].cpu().detach())]
+
+    #             center_x = (x1 + x2) / 2.0
+    #             center_y = (y1 + y2) / 2.0
+                
+    #             prediction_record = {
+    #                 "x": float(center_x),
+    #                 "y": float(center_y),
+    #                 "label": str(label),
+    #                 "confidence": float(confidence),
+    #                 "bbox": [float(x1), float(y1), float(x2), float(y2)]
+    #             }
+    #             single_image_preds.append(prediction_record)
+    #         predictions.append(single_image_preds)
+    #     return predictions
