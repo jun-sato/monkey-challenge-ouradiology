@@ -32,24 +32,32 @@ patch_shapes = [
 ]
 overlaps = [
     # (0, 0),
-    # (4, 4),
-    # (16, 16),
-    (8, 8)
+    # (32, 32),
+    (0, 0),
+    # (64, 64)
 ]
 image_paths = [
-    "./data/images/pas-cpg/A_P000002_PAS_CPG.tif",
+    "./data/images/pas-cpg/A_P000003_PAS_CPG.tif",
+    "./data/images/pas-cpg/B_P000002_PAS_CPG.tif",
+    "./data/images/pas-cpg/C_P000022_PAS_CPG.tif",
+    "./data/images/pas-cpg/D_P000002_PAS_CPG.tif",
 ]
 mask_paths = [
-    "./data/images/tissue-masks/A_P000002_mask.tif",
+    "./data/images/tissue-masks/A_P000003_mask.tif",
+    "./data/images/tissue-masks/B_P000002_mask.tif",
+    "./data/images/tissue-masks/C_P000022_mask.tif",
+    "./data/images/tissue-masks/D_P000002_mask.tif",
 ]
 thresholds = [0.1]     # Detectron2内部のthreshold
-nms_thresholds = [0.15]  # Detectron2内部のnms_threshold
+nms_thresholds = [1]  # Detectron2内部のnms_threshold
 class_thresholds_list = [
-    {"lymphocyte": 0.7, "monocyte": 0.3},
-    # {"lymphocyte": 0.4, "monocyte": 0.15},
+    # {"lymphocyte": 0.7, "monocyte": 0.3},
+    # {"lymphocyte": 0.6, "monocyte": 0.25},
+    # {"lymphocyte": 0.5, "monocyte": 0.2},
+    {"lymphocyte": 0.4, "monocyte": 0.15},
     # {"lymphocyte": 0.3, "monocyte": 0.1}
 ]
-weight_root = "./outputs/model_0000799.pth"
+weight_root = "./outputs/model_0000999.pth"
 
 ##best 128, 0.6,0.25,0.15,(0,0)
 ##best 224, 0.4,0.15,0.15,(8,0)
@@ -103,20 +111,26 @@ def inference(iterator, predictor, spacing, image_path, output_path, json_filena
     ratio = spacing/spacing_min
     with WholeSlideImage(image_path) as wsi:
         spacing = wsi.get_real_spacing(spacing_min)
-
+        x_size, y_size = wsi.get_shape_from_spacing(spacing_min)
+    # 全パッチの検出を集約
+    all_boxes = []   # [[x1_global, y1_global, x2_global, y2_global], ...]
+    all_scores = []  # [confidence1, confidence2, ...]
+    all_labels = []  # [1 or 2, 1 or 2, ...] (lymphocyte->1, monocyte->2)
     all_predictions = []  # 全予測結果を入れる
+    
     for x_batch, y_batch, info in tqdm(iterator):
         x_batch = x_batch.squeeze(0)
         y_batch = y_batch.squeeze(0)
 
         predictions = predictor.predict_on_batch(x_batch)
+        
+        c = info['x']
+        r = info['y']
+        
         for idx, prediction in enumerate(predictions):
 
-            c = info['x']
-            r = info['y']
-
             for detections in prediction:
-                x, y, label, confidence = detections.values()
+                x, y, label, confidence,x1,y1,x2,y2 = detections.values()
                 #print(f'x: {x}, y: {y}, label: {label}, confidence: {confidence},{y_batch[idx].shape}')
                 if confidence < class_thresholds[label]:
                     continue
@@ -126,30 +140,80 @@ def inference(iterator, predictor, spacing, image_path, output_path, json_filena
                 
                 x = x*ratio + c # x is in spacing= 0.5 but c is in spacing = 0.25
                 y = y*ratio + r
-                prediction_record = {
-                    "name" : "Point "+str(counter),
-                    "point": [
-                        px_to_mm(x, spacing),
-                        px_to_mm(y, spacing),
-                        0.24199951445730394,
-                    ],
-                    "probability": confidence,
-                }
-                
-                if label == 'lymphocyte':
-                    output_dict["points"].append(prediction_record)
-                    output_dict_inflammatory_cells["points"].append(prediction_record)
-                elif label == 'monocyte':
-                    output_dict_monocytes["points"].append(prediction_record)
-                    output_dict_inflammatory_cells["points"].append(prediction_record)
-                
-                annotations.append((x, y))
-                counter += 1
 
-    print(len(output_dict["points"]),len(output_dict_monocytes["points"]),len(output_dict_inflammatory_cells["points"]))  
+                # グローバルスケールに変換
+                x1_global = x1 * ratio + c
+                y1_global = y1 * ratio + r
+                x2_global = x2 * ratio + c
+                y2_global = y2 * ratio + r
+                lbl_id = 1 if label == "lymphocyte" else 2
+                
+                all_boxes.append([x1_global, y1_global, x2_global, y2_global])
+                all_scores.append(confidence)
+                all_labels.append(lbl_id)
+                
+    print(f"Raw detection count: {len(all_boxes)}")
+    wbf_boxes_abs, wbf_scores, wbf_labels = apply_wbf_from_arrays(
+        all_boxes,
+        all_scores,
+        all_labels,
+        x_size,
+        y_size,
+        iou_thr=0.3,
+        skip_box_thr=0.0001
+    )
+    # WBF後のボックスを点に変換（中心点計算）
+    for i, (box, score, lbl) in enumerate(zip(wbf_boxes_abs, wbf_scores, wbf_labels)):
+        x1, y1, x2, y2 = box
+        cx = (x1 + x2) / 2
+        cy = (y1 + y2) / 2
 
-    print(f"Predicted {len(annotations)} points")
+        # JSONに保存する形式を作成
+        prediction_record = {
+            "name": "Point "+str(i),
+            "point": [
+                px_to_mm(cx, spacing),
+                px_to_mm(cy, spacing),
+                0.24199951445730394,
+            ],
+            "probability": float(score),
+        }
+        if lbl == 1:  # lymphocyte
+            output_dict["points"].append(prediction_record)
+            output_dict_inflammatory_cells["points"].append(prediction_record)
+        elif lbl == 2:  # monocyte
+            output_dict_monocytes["points"].append(prediction_record)
+            output_dict_inflammatory_cells["points"].append(prediction_record)
+
+        annotations.append((cx, cy))
+
+    print(len(output_dict["points"]), len(output_dict_monocytes["points"]), len(output_dict_inflammatory_cells["points"]))
+    print(f"Predicted {len(annotations)} points after WBF")
     print("saving predictions...")
+                # prediction_record = {
+                #     "name" : "Point "+str(counter),
+                #     "point": [
+                #         px_to_mm(x, spacing),
+                #         px_to_mm(y, spacing),
+                #         0.24199951445730394,
+                #     ],
+                #     "probability": confidence,
+                # }
+                
+                # if label == 'lymphocyte':
+                #     output_dict["points"].append(prediction_record)
+                #     output_dict_inflammatory_cells["points"].append(prediction_record)
+                # elif label == 'monocyte':
+                #     output_dict_monocytes["points"].append(prediction_record)
+                #     output_dict_inflammatory_cells["points"].append(prediction_record)
+                
+                # annotations.append((x, y))
+                # counter += 1
+
+        # print(len(output_dict["points"]),len(output_dict_monocytes["points"]),len(output_dict_inflammatory_cells["points"]))  
+
+        # print(f"Predicted {len(annotations)} points")
+        # print("saving predictions...")
 
     # saving xml file
     annotations_wsd = to_wsd(annotations)
@@ -185,8 +249,10 @@ def inference(iterator, predictor, spacing, image_path, output_path, json_filena
     )
 
     print("finished!")
-    return len(annotations), len(output_dict["points"]), len(output_dict_monocytes["points"]), len(output_dict_inflammatory_cells["points"])
-    
+    return (len(annotations),
+            len(output_dict["points"]),
+            len(output_dict_monocytes["points"]),
+            len(output_dict_inflammatory_cells["points"]))
 
 # ==== 修正2: CSV出力 ====
 csv_file = "hyperparam_tuning.csv"

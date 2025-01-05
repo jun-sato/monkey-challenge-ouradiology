@@ -32,8 +32,8 @@ class BatchPredictor(DefaultPredictor):
                 # whether the model expects BGR inputs or RGB
                 image = image[:, :, ::-1]
             height, width = image.shape[:2]
-            new_image = transform(image)
-            new_image = torch.as_tensor(new_image.astype("float32").transpose(2, 0, 1))
+            #new_image = transform(image)
+            new_image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
 
             input_images.append({"image": new_image, "height": height, "width": width})
 
@@ -45,11 +45,18 @@ class BatchPredictor(DefaultPredictor):
 class Detectron2DetectionPredictor:
     def __init__(self, output_dir, threshold, nms_threshold, weight_root):
         cfg = get_cfg()
-        cfg.merge_from_file(
-            model_zoo.get_config_file(
-                "COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
+        if '0000' in weight_root:
+            cfg.merge_from_file(
+                model_zoo.get_config_file(
+                    "COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
+                )
             )
-        )
+        else:
+            cfg.merge_from_file(
+                model_zoo.get_config_file(
+                    "COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
+                )
+            )
 
 
         cfg.DATASETS.TRAIN = ("detection_dataset2",)
@@ -85,6 +92,7 @@ class Detectron2DetectionPredictor:
     def predict_on_batch(self, x_batch):
         # format is documented at https://detectron2.readthedocs.io/tutorials/models.html#model-output-format
         outputs = self._predictor(x_batch)
+
         predictions = []
         for output in outputs:
             predictions.append([])
@@ -95,47 +103,21 @@ class Detectron2DetectionPredictor:
             centers = pred_boxes.get_centers()
             for idx, center in enumerate(centers):
                 x, y = center.cpu().detach().numpy()
+                pred_box = pred_boxes[idx].tensor.cpu().detach().numpy()[0]
                 confidence = scores[idx].cpu().detach().numpy()
                 label = inv_label_map[int(classes[idx].cpu().detach())]
-                
                 # if confidence >= class_thresholds[label]:
                 prediction_record = {
                     "x": int(x),
                     "y": int(y),
                     "label": str(label),
                     "confidence": float(confidence),
+                    "x1": pred_box[0],
+                    "y1": pred_box[1],
+                    "x2": pred_box[2],
+                    "y2": pred_box[3]
                 }
                 predictions[-1].append(prediction_record)
         return predictions
 
 
-    # def predict_on_batch(self, x_batch):
-    #     outputs = self._predictor(x_batch)
-    #     predictions = []
-    #     for output in outputs:
-    #         single_image_preds = []
-    #         pred_boxes = output["instances"].get("pred_boxes")
-    #         scores = output["instances"].get("scores")
-    #         classes = output["instances"].get("pred_classes")
-            
-    #         # get box coordinates (x1,y1,x2,y2)
-    #         boxes = pred_boxes.tensor.cpu().detach().numpy()
-
-    #         for idx, box in enumerate(boxes):
-    #             x1, y1, x2, y2 = box
-    #             confidence = scores[idx].cpu().detach().numpy()
-    #             label = inv_label_map[int(classes[idx].cpu().detach())]
-
-    #             center_x = (x1 + x2) / 2.0
-    #             center_y = (y1 + y2) / 2.0
-                
-    #             prediction_record = {
-    #                 "x": float(center_x),
-    #                 "y": float(center_y),
-    #                 "label": str(label),
-    #                 "confidence": float(confidence),
-    #                 "bbox": [float(x1), float(y1), float(x2), float(y2)]
-    #             }
-    #             single_image_preds.append(prediction_record)
-    #         predictions.append(single_image_preds)
-    #     return predictions

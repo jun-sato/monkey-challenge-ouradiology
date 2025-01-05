@@ -166,28 +166,20 @@ def average_cluster_iou(cluster):
     }
 
 
-def apply_wbf_to_predictions(predictions, image_width, image_height, iou_thr=0.5, skip_box_thr=0.0001):
+
+
+def apply_wbf_from_arrays(all_boxes, all_scores, all_labels, image_width, image_height, iou_thr=0.5, skip_box_thr=0.0001):
     """
-    predictions: Detectron2の1画像に対する出力結果 (Instancesオブジェクト想定)
-    image_width, image_height: 画像サイズ
-    iou_thr: WBFでのIoU閾値
-    skip_box_thr: 最低スコア閾値
-
-    Returns:
-        wbf_boxes, wbf_scores, wbf_labels
+    all_boxes: [[x1, y1, x2, y2], [x1, y1, x2, y2], ...]
+    all_scores: [score1, score2, ...]
+    all_labels: [label_id1, label_id2, ...]
+    image_width, image_height: 全体画像サイズ
+    iou_thr: WBFで使用するIoU閾値
+    skip_box_thr: スコアがこれ未満のボックスを除外
     """
-
-    # Detectron2のpredictionがInstancesとして返ってくる場合:
-    # boxes: Tensor [N,4] (x1,y1,x2,y2)
-    # scores: Tensor [N]
-    # pred_classes: Tensor [N] (クラスID)
-    boxes = predictions.pred_boxes.tensor.cpu().numpy()  # shape: (N,4)
-    scores = predictions.scores.cpu().numpy()            # shape: (N,)
-    labels = predictions.pred_classes.cpu().numpy()      # shape: (N,)
-
-    # 座標を0~1に正規化
+    # 0~1への正規化
     boxes_norm = []
-    for box in boxes:
+    for box in all_boxes:
         x1, y1, x2, y2 = box
         boxes_norm.append([
             x1 / image_width,
@@ -195,21 +187,19 @@ def apply_wbf_to_predictions(predictions, image_width, image_height, iou_thr=0.5
             x2 / image_width,
             y2 / image_height
         ])
-    boxes_norm = [boxes_norm]  # WBFはリストのリストを要求(単一モデルなら1要素のリストに)
 
-    scores_list = [scores.tolist()]
-    labels_list = [labels.tolist()]
+    boxes_list = [boxes_norm]        # 単一モデルのリストとして渡す
+    scores_list = [all_scores]
+    labels_list = [all_labels]
 
-    # WBFの実行
-    # weights=Noneは各モデル同等とみなす
     wbf_boxes, wbf_scores, wbf_labels = weighted_boxes_fusion(
-        boxes_norm, scores_list, labels_list,
+        boxes_list, scores_list, labels_list,
         weights=None,
         iou_thr=iou_thr,
         skip_box_thr=skip_box_thr
     )
 
-    # wbf_boxesは0~1正規化された座標で返ってくるため、元に戻す
+    # 元スケールに戻す
     wbf_boxes_abs = []
     for (x1, y1, x2, y2) in wbf_boxes:
         wbf_boxes_abs.append([

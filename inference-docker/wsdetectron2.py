@@ -5,6 +5,7 @@ import torch
 from detectron2 import model_zoo
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
+from ensemble_boxes import weighted_boxes_fusion
 
 SIZE = 224
 AUG = T.FixedSizeCrop((SIZE, SIZE), pad_value=0)
@@ -31,8 +32,8 @@ class BatchPredictor(DefaultPredictor):
                 # whether the model expects BGR inputs or RGB
                 image = image[:, :, ::-1]
             height, width = image.shape[:2]
-            new_image = transform(image)
-            new_image = torch.as_tensor(new_image.astype("float32").transpose(2, 0, 1))
+            #new_image = transform(image)
+            new_image = torch.as_tensor(image.astype("float32").transpose(2, 0, 1))
 
             input_images.append({"image": new_image, "height": height, "width": width})
 
@@ -44,11 +45,18 @@ class BatchPredictor(DefaultPredictor):
 class Detectron2DetectionPredictor:
     def __init__(self, output_dir, threshold, nms_threshold, weight_root):
         cfg = get_cfg()
-        cfg.merge_from_file(
-            model_zoo.get_config_file(
-                "COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
+        if '999' in weight_root:
+            cfg.merge_from_file(
+                model_zoo.get_config_file(
+                    "COCO-Detection/faster_rcnn_R_101_FPN_3x.yaml"
+                )
             )
-        )
+        else:
+            cfg.merge_from_file(
+                model_zoo.get_config_file(
+                    "COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
+                )
+            )
 
 
         cfg.DATASETS.TRAIN = ("detection_dataset2",)
@@ -57,15 +65,19 @@ class Detectron2DetectionPredictor:
 
         cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 512
         cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2
-        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[8, 16, 24]]
-        cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[1.0]]
+        cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[16, 24, 32]]
+        #cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[1.0]]
 
-        cfg.SOLVER.IMS_PER_BATCH = 10
-        cfg.SOLVER.BASE_LR = 0.001  # pick a good LR
-        cfg.SOLVER.MAX_ITER = 2000  # 2000 iterations seems good enough for this toy dataset; you may need to train longer for a practical dataset
-        cfg.SOLVER.STEPS = (10, 100, 250)
-        cfg.SOLVER.WARMUP_ITERS = 0
+
+        cfg.SOLVER.IMS_PER_BATCH = 256
+        cfg.SOLVER.BASE_LR = 0.002  # pick a good LR
+        cfg.SOLVER.MAX_ITER = 1000  # 2000 iterations seems good enough for this toy dataset; you may need to train longer for a practical dataset
+        cfg.SOLVER.STEPS = (500, 750)
+        cfg.SOLVER.WARMUP_ITERS = 100
+        cfg.SOLVER.WARMUP_FACTOR = 1.0/1000 
         cfg.SOLVER.GAMMA = 0.5
+        cfg.SOLVER.CHECKPOINT_PERIOD = 200
+
         ###
         ###
 
@@ -96,13 +108,63 @@ class Detectron2DetectionPredictor:
             centers = pred_boxes.get_centers()
             for idx, center in enumerate(centers):
                 x, y = center.cpu().detach().numpy()
+                pred_box = pred_boxes[idx].tensor.cpu().detach().numpy()[0]
                 confidence = scores[idx].cpu().detach().numpy()
                 label = inv_label_map[int(classes[idx].cpu().detach())]
+                # if confidence >= class_thresholds[label]:
                 prediction_record = {
                     "x": int(x),
                     "y": int(y),
                     "label": str(label),
                     "confidence": float(confidence),
+                    "x1": pred_box[0],
+                    "y1": pred_box[1],
+                    "x2": pred_box[2],
+                    "y2": pred_box[3]
                 }
                 predictions[-1].append(prediction_record)
         return predictions
+    
+    
+def apply_wbf_from_arrays(all_boxes, all_scores, all_labels, image_width, image_height, iou_thr=0.5, skip_box_thr=0.001):
+    """
+    all_boxes: [[x1, y1, x2, y2], [x1, y1, x2, y2], ...]
+    all_scores: [score1, score2, ...]
+    all_labels: [label_id1, label_id2, ...]
+    image_width, image_height: 全体画像サイズ
+    iou_thr: WBFで使用するIoU閾値
+    skip_box_thr: スコアがこれ未満のボックスを除外
+    """
+    # 0~1への正規化
+    boxes_norm = []
+    for box in all_boxes:
+        x1, y1, x2, y2 = box
+        boxes_norm.append([
+            x1 / image_width,
+            y1 / image_height,
+            x2 / image_width,
+            y2 / image_height
+        ])
+
+    boxes_list = [boxes_norm]        # 単一モデルのリストとして渡す
+    scores_list = [all_scores]
+    labels_list = [all_labels]
+
+    wbf_boxes, wbf_scores, wbf_labels = weighted_boxes_fusion(
+        boxes_list, scores_list, labels_list,
+        weights=None,
+        iou_thr=iou_thr,
+        skip_box_thr=skip_box_thr
+    )
+
+    # 元スケールに戻す
+    wbf_boxes_abs = []
+    for (x1, y1, x2, y2) in wbf_boxes:
+        wbf_boxes_abs.append([
+            x1 * image_width,
+            y1 * image_height,
+            x2 * image_width,
+            y2 * image_height
+        ])
+
+    return wbf_boxes_abs, wbf_scores, wbf_labels
