@@ -5,7 +5,7 @@ import torch
 from detectron2 import model_zoo
 from detectron2.config import get_cfg
 from detectron2.engine import DefaultPredictor
-from utils.loss import MyFocalROIHeads 
+from utils.loss import MyFocalROIHeads, MyStandardROIHeads
 
 SIZE = 224
 AUG = T.FixedSizeCrop((SIZE, SIZE), pad_value=0)
@@ -68,7 +68,7 @@ class Detectron2DetectionPredictor:
         cfg.MODEL.ROI_HEADS.NUM_CLASSES = 2
         cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[16, 24, 32]]
         #cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS = [[1.0]]
-        cfg.MODEL.ROI_HEADS.NAME = "MyFocalROIHeads"
+        cfg.MODEL.ROI_HEADS.NAME = "MyStandardROIHeads"
 
         cfg.SOLVER.IMS_PER_BATCH = 256
         cfg.SOLVER.BASE_LR = 0.002  # pick a good LR
