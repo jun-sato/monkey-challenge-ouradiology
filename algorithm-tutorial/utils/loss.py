@@ -12,86 +12,86 @@ from detectron2.modeling.roi_heads import StandardROIHeads
 from detectron2.modeling.roi_heads import ROI_HEADS_REGISTRY
 
 # @ROI_HEADS_REGISTRY.register()
-# class MyFocalROIHeads(StandardROIHeads):
-#     # def __init__(self, cfg, input_shape):
-#     #     super().__init__(cfg, input_shape)
-#     #     # ドロップアウトレイヤーを定義 (p=0.5は例)
-#     #     self.dropout = nn.Dropout(p=0.5)
+class MyFocalROIHeads(StandardROIHeads):
+    # def __init__(self, cfg, input_shape):
+    #     super().__init__(cfg, input_shape)
+    #     # ドロップアウトレイヤーを定義 (p=0.5は例)
+    #     self.dropout = nn.Dropout(p=0.5)
     
-#     # def _forward_box(self, features, proposals):
-#     #     if self.training:
-#     #         # トレーニング時
-#     #         pred_class_logits, pred_proposal_deltas = super()._forward_box(features, proposals)
-#     #         pred_class_logits = self.dropout(pred_class_logits)
-#     #         return pred_class_logits, pred_proposal_deltas
-#     #     else:
-#     #         # 推論時は1つだけ返る
-#     #         pred_instances = super()._forward_box(features, proposals)
-#     #         # 推論時はドロップアウト不要、またpred_instancesは既に最終出力なのでそのまま返す
-#     #         return pred_instances
+    # def _forward_box(self, features, proposals):
+    #     if self.training:
+    #         # トレーニング時
+    #         pred_class_logits, pred_proposal_deltas = super()._forward_box(features, proposals)
+    #         pred_class_logits = self.dropout(pred_class_logits)
+    #         return pred_class_logits, pred_proposal_deltas
+    #     else:
+    #         # 推論時は1つだけ返る
+    #         pred_instances = super()._forward_box(features, proposals)
+    #         # 推論時はドロップアウト不要、またpred_instancesは既に最終出力なのでそのまま返す
+    #         return pred_instances
 
     
-#     def losses(self, predictions, proposals):
-#         """
-#         FROCを最適化する分類損失と回帰損失を含むカスタムROIヘッド。
+    def losses(self, predictions, proposals):
+        """
+        FROCを最適化する分類損失と回帰損失を含むカスタムROIヘッド。
         
-#         Args:
-#             predictions: モデルの出力
-#                 - pred_class_logits: 分類スコア (N, num_classes)
-#                 - pred_proposal_deltas: ボックス回帰のデルタ (N, 4)
-#             proposals: RoIAlign後の提案ボックス
-#                 - gt_classes: 各ボックスの正解クラス
-#                 - gt_boxes: 各ボックスの正解座標
-#         Returns:
-#             dict: 計算した損失を含む辞書
-#         """
-#         pred_class_logits, pred_proposal_deltas = predictions
+        Args:
+            predictions: モデルの出力
+                - pred_class_logits: 分類スコア (N, num_classes)
+                - pred_proposal_deltas: ボックス回帰のデルタ (N, 4)
+            proposals: RoIAlign後の提案ボックス
+                - gt_classes: 各ボックスの正解クラス
+                - gt_boxes: 各ボックスの正解座標
+        Returns:
+            dict: 計算した損失を含む辞書
+        """
+        pred_class_logits, pred_proposal_deltas = predictions
 
-#         # GTクラスとGTボックスを抽出
-#         gt_classes = torch.cat([p.gt_classes for p in proposals], dim=0)
-#         gt_boxes = torch.cat([p.gt_boxes.tensor for p in proposals], dim=0)
+        # GTクラスとGTボックスを抽出
+        gt_classes = torch.cat([p.gt_classes for p in proposals], dim=0)
+        gt_boxes = torch.cat([p.gt_boxes.tensor for p in proposals], dim=0)
         
-#         # 提案ボックスとスコアを抽出
-#         pred_boxes = self.box_predictor.predict_boxes((None, pred_proposal_deltas), proposals)
-#         pred_scores = self.box_predictor.predict_probs((pred_class_logits, None), proposals)
+        # 提案ボックスとスコアを抽出
+        pred_boxes = self.box_predictor.predict_boxes((None, pred_proposal_deltas), proposals)
+        pred_scores = self.box_predictor.predict_probs((pred_class_logits, None), proposals)
         
-#         # 提案ボックスとスコアを結合 (flatten)
-#         pred_boxes = torch.cat(pred_boxes, dim=0)  # (N, 4)
-#         pred_scores = torch.cat(pred_scores, dim=0)  # (N,) - 正例スコアを取得
+        # 提案ボックスとスコアを結合 (flatten)
+        pred_boxes = torch.cat(pred_boxes, dim=0)  # (N, 4)
+        pred_scores = torch.cat(pred_scores, dim=0)  # (N,) - 正例スコアを取得
         
-#         # multi_class_froc_lossでクラスごとのTP/FP判定を行う
-#         froc_loss_cls = multi_class_froc_loss(
-#             pred_boxes=pred_boxes,
-#             pred_scores=pred_scores,   # (N,3)
-#             gt_boxes=gt_boxes,         # (M,4)
-#             gt_classes=gt_classes,     # (M,)
-#             distance_thresholds={1: 16.0, 2: 20.0},  # px単位 or mm単位に合わせて要調整
-#         )
+        # multi_class_froc_lossでクラスごとのTP/FP判定を行う
+        froc_loss_cls = multi_class_froc_loss(
+            pred_boxes=pred_boxes,
+            pred_scores=pred_scores,   # (N,3)
+            gt_boxes=gt_boxes,         # (M,4)
+            gt_classes=gt_classes,     # (M,)
+            distance_thresholds={1: 16.0, 2: 20.0},  # px単位 or mm単位に合わせて要調整
+        )
 
-#         # --- 回帰損失 (FROCに基づく) ---
-#         froc_loss_box_reg = multi_class_froc_bbox_loss(
-#             pred_boxes=pred_boxes,
-#             pred_scores=pred_scores,
-#             gt_boxes=gt_boxes,
-#             gt_classes=gt_classes,
-#             distance_thresholds={1: 16.0, 2: 20.0},  # px単位 or mm単位に合わせて要調整
-#         )
+        # --- 回帰損失 (FROCに基づく) ---
+        froc_loss_box_reg = multi_class_froc_bbox_loss(
+            pred_boxes=pred_boxes,
+            pred_scores=pred_scores,
+            gt_boxes=gt_boxes,
+            gt_classes=gt_classes,
+            distance_thresholds={1: 16.0, 2: 20.0},  # px単位 or mm単位に合わせて要調整
+        )
 
-#         return {
-#             "loss_cls": froc_loss_cls,
-#             "loss_box_reg": froc_loss_box_reg,
-#         }
+        return {
+            "loss_cls": froc_loss_cls,
+            "loss_box_reg": froc_loss_box_reg,
+        }
 
-        # # 分類損失 (FROCに基づく)
-        # froc_loss_cls = froc_loss(pred_boxes, pred_scores, gt_boxes)
+        # 分類損失 (FROCに基づく)
+        froc_loss_cls = froc_loss(pred_boxes, pred_scores, gt_boxes)
 
-        # # 回帰損失 (FROCに基づく)
-        # froc_loss_box_reg = froc_bbox_loss(pred_boxes, gt_boxes, distance_threshold=20)
+        # 回帰損失 (FROCに基づく)
+        froc_loss_box_reg = froc_bbox_loss(pred_boxes, gt_boxes, distance_threshold=20)
 
-        # return {
-        #     "loss_cls": froc_loss_cls,        # 分類損失
-        #     "loss_box_reg": froc_loss_box_reg  # 回帰損失
-        # }
+        return {
+            "loss_cls": froc_loss_cls,        # 分類損失
+            "loss_box_reg": froc_loss_box_reg  # 回帰損失
+        }
 
 def multi_class_froc_loss(
     pred_boxes,
@@ -381,6 +381,48 @@ def _log_classification_stats(pred_logits, gt_classes):
     # 必要に応じて統計表示の実装を入れる
     pass
 
+
+def froc_loss(pred_boxes, pred_scores, gt_boxes, distance_threshold=5.0):
+    """
+    FROCを用いた簡易的な分類ロス（1クラス想定）。
+    pred_scores: (N,) 0～1の検出スコア (前景確信度)
+    pred_boxes:  (N, 4)
+    gt_boxes:    (M, 4)
+    distance_threshold: 中心間距離の閾値 (pxやmm等)
+    
+    戻り値: ロス値 (スカラー)
+    """
+    device = pred_boxes.device
+    num_preds = pred_boxes.size(0)
+    num_gts = gt_boxes.size(0)
+
+    # GTが存在するのに予測がない -> FN = GT数ぶんペナルティ
+    if num_preds == 0:
+        # ここでは単純に "未検出のGT数" をロスに加える
+        return torch.tensor(float(num_gts), device=device)
+
+    # バウンディングボックス中心 (N, 2) / (M, 2)
+    pred_centers = (pred_boxes[:, :2] + pred_boxes[:, 2:]) / 2
+    gt_centers   = (gt_boxes[:, :2]   + gt_boxes[:, 2:])   / 2
+
+    # 中心間距離 (N, M)
+    dists = torch.cdist(pred_centers, gt_centers)
+    
+    # TP判定: 少なくとも1つのGTと distance_threshold 以下であればTP
+    tp_mask = (dists <= distance_threshold).any(dim=1).float()  # (N,)
+    fp_mask = 1.0 - tp_mask  # TPでない -> FP
+
+    # ロス計算例：
+    #  - TP → スコアが高いほどロス小さく: -log(score)
+    #  - FP → スコアが高いほどペナルティ大きく: + score
+    eps = 1e-6
+    tp_loss = -torch.log(pred_scores + eps) * tp_mask
+    fp_loss = pred_scores * fp_mask
+
+    loss = tp_loss.sum() + fp_loss.sum()
+    return loss / num_preds
+
+
 class FocalLoss(torch.nn.Module):
     """
     例: シンプルなマルチクラスFocalLoss
@@ -439,10 +481,12 @@ def diou_loss(pred_boxes, gt_boxes, eps=1e-7):
     enclose_h = (enclose_y2 - enclose_y1).clamp(min=0)
     c2 = enclose_w**2 + enclose_h**2 + eps
 
-    diou = iou - (center_dist_sq / c2)*100
-    #print(iou, center_dist_sq, c2, diou)
+    diou = iou - (center_dist_sq / c2)*5
     diou = torch.clamp(diou, min=-1.0, max=1.0)
     return 1.0 - diou
+
+
+
 
 class MyFastRCNNOutputLayers(FastRCNNOutputLayers):
     """
@@ -488,8 +532,8 @@ class MyFastRCNNOutputLayers(FastRCNNOutputLayers):
 
         # ----- 分類ロス: Focal Loss -----
         if len(gt_classes) > 0:
-            focal_loss_fn = FocalLoss(gamma=2.0, alpha=0.25)
-            loss_cls = focal_loss_fn(scores, gt_classes)
+            focal_loss_fn = FocalLoss(gamma=1, alpha=0.25)
+            loss_cls = focal_loss_fn(scores, gt_classes)*5
         else:
             # 提案が無い場合はロス0（または空）
             loss_cls = scores.sum() * 0.0
@@ -498,6 +542,7 @@ class MyFastRCNNOutputLayers(FastRCNNOutputLayers):
         # Detectron2のデフォルト挙動:
         #   "もし gt_boxes が無い（= 負例）なら そのproposalは回帰ロスに含めない"
         #   "つまり gt_classes < 0 or >= num_classes も除外"
+        
         loss_box_reg = self.diou_box_loss(proposal_boxes, gt_boxes_, proposal_deltas, gt_classes)
 
         losses = {
@@ -544,7 +589,6 @@ class MyFastRCNNOutputLayers(FastRCNNOutputLayers):
         # 5) DIoU loss
         diou_vals = diou_loss(pred_boxes_fg, gt_boxes_fg)
         return diou_vals.mean()
-
 
 @ROI_HEADS_REGISTRY.register()
 class MyFocalROIHeads(StandardROIHeads):
