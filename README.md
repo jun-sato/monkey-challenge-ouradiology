@@ -1,9 +1,143 @@
-# The MONKEY challenge: Machine-learning for Optimal detection of iNflammatory cells in KidnEY transplant biopsies
-This repository contains all tutorials and code in connection with the MONKEY challenge run on [Grand Challenge](https://monkey.grand-challenge.org/)
+# ouradiology team approach of the MONKEY challenge: 
+This repository contains all tutorials and code in connection with the MONKEY challenge run on [Grand Challenge](https://monkey.grand-challenge.org/)  
+We greatly appreciate [Baseline code](https://github.com/computationalpathologygroup/monkey-challenge).
 
-## Baseline algorithm tutorial
-The folder `tutorials` contains the code to get started with the MONKEY challenge.
-The Jupyter notebooks show you how to preprocess the data, train a model and run inference.
+# Training Overview
+
+This repository demonstrates how to train a Faster R-CNN model for lymphocyte detection in whole slide images (WSIs) using [WholeSlideData](https://github.com/ComputationalPathologyGroup/wholeslidedata) and [Detectron2](https://github.com/facebookresearch/detectron2). It includes a pipeline setup for creating patches from WSIs, preparing annotations, and training a customized Faster R-CNN model.
+
+## What is the difference between our approach and baseline?
+image size: [96, 96] → [224, 224]  
+long training epoch 200 → 2000  
+large learning rate 200 → 2000  
+ensemble: none → wbf
+
+
+## Main Libraries & Tools
+
+- **WholeSlideData**  
+  Handles patch sampling, annotation parsing, and data iteration for WSIs.
+- **Detectron2**  
+  A flexible object detection library. Here we use a Faster R-CNN model from the [model_zoo](https://github.com/facebookresearch/detectron2/tree/main/configs).
+
+---
+
+## Configuration Details
+
+### WholeSlideData (`user_config`)
+
+```yaml
+wholeslidedata:
+  default:
+    yaml_source: "./configs/training_sample.yml"
+    image_backend: "asap"
+    labels:
+      ROI: 0
+      lymphocytes: 1
+
+    batch_shape:
+      batch_size: 10
+      spacing: 0.5
+      shape: [256, 256, 3]
+      y_shape: [1000, 6]
+
+    annotation_parser:
+      sample_label_names: ['roi']
+
+    point_sampler_name: "RandomPointSampler"
+    point_sampler:
+      buffer:
+        spacing: ${batch_shape.spacing}
+        value: -64
+
+    patch_label_sampler_name: "DetectionPatchLabelSampler"
+    patch_label_sampler:
+      max_number_objects: 1000
+      detection_labels: ['lymphocytes']
+```
+
+- **`batch_shape.batch_size`**: Number of patches per batch (10)  
+- **`batch_shape.shape`**: Size of each patch (256×256×3)  
+- **`point_sampler_name`**: Randomly samples patch locations  
+- **`patch_label_sampler.max_number_objects`**: Maximum objects per patch (1000)
+
+### Detectron2 Config
+
+```python
+cfg.merge_from_file(
+    model_zoo.get_config_file("COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml")
+)
+cfg.DATASETS.TRAIN = ("detection_dataset2",)
+cfg.DATASETS.TEST = ()
+cfg.DATALOADER.NUM_WORKERS = 1
+
+cfg.MODEL.ROI_HEADS.BATCH_SIZE_PER_IMAGE = 512
+cfg.MODEL.ROI_HEADS.NUM_CLASSES = 1
+cfg.MODEL.ANCHOR_GENERATOR.SIZES = [[16, 24, 32]]
+
+cfg.SOLVER.IMS_PER_BATCH = 10
+cfg.SOLVER.BASE_LR = 0.001
+cfg.SOLVER.MAX_ITER = 2000
+cfg.SOLVER.STEPS = (10, 100, 250)
+cfg.SOLVER.WARMUP_ITERS = 0
+cfg.SOLVER.GAMMA = 0.5
+```
+
+- **Model**: `faster_rcnn_X_101_32x8d_FPN_3x`  
+- **ROI_HEADS.NUM_CLASSES**: Number of classes (1; for lymphocytes)  
+- **SOLVER.IMS_PER_BATCH**: Mini-batch size (10)  
+- **SOLVER.BASE_LR**: Initial learning rate (0.001)  
+- **SOLVER.MAX_ITER**: Maximum training iterations (2000)  
+- **SOLVER.STEPS**: Iteration milestones for LR decay (10, 100, 250)  
+- **ANCHOR_GENERATOR.SIZES**: Anchor sizes ([16, 24, 32])
+
+---
+
+## Training Process
+
+1. **Batch Iterator Creation**  
+   The `create_batch_iterator` function from WholeSlideData generates patch data according to the `user_config`.
+
+2. **Model Configuration**  
+   The Detectron2 config (`cfg`) loads the Faster R-CNN architecture from the model zoo.
+
+3. **Trainer Execution**  
+   A `WholeSlideDectectron2Trainer` uses both the `cfg` and `user_config` to start the training process.
+
+4. **Output**  
+   - Logs, model checkpoints, and final model weights are saved in the specified `OUTPUT_DIR` (default: `./outputs`).
+
+---
+
+## Model Parameter Count
+
+```python
+model = build_model(cfg)
+pytorch_total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print("Parameter Count:\n" + str(pytorch_total_params))
+```
+
+- This snippet displays the total number of trainable parameters in the Faster R-CNN model.
+
+---
+
+## How to Run
+
+```bash
+git clone <this_repository>
+cd <this_repository>
+python training.py
+```
+
+- Training outputs (model weights, logs) are saved in `./outputs` by default.
+
+---
+
+## License
+
+This repository is released under the [MIT License](LICENSE). Please see the [LICENSE](LICENSE) file for details.
+
+
 
 ## Creating the inference docker image
 The folder `docker` contains the code to create the inference docker image that can be submitted to the MONKEY challenge.
@@ -60,3 +194,5 @@ There is also an optional `prob_cutoff` argument, that lets you filter out annot
 Helpful for visualising your results in ASAP.
 - `plot_froc.py`: Script that plots the FROC curve from the metrics.json file generated by the evaluation script 
 (this is also available for download on grand-challenge for the validation set cases).
+
+
