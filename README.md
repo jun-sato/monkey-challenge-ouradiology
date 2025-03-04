@@ -1,24 +1,30 @@
-# ouradiology team approach of the MONKEY challenge: 
-This repository contains all tutorials and code in connection with the MONKEY challenge run on [Grand Challenge](https://monkey.grand-challenge.org/)  
-We greatly appreciate [Baseline code](https://github.com/computationalpathologygroup/monkey-challenge).
+# ouradiology team approach for the MONKEY challenge
 
-# Training Overview
+This repository contains all tutorials and code for the MONKEY challenge on [Grand Challenge](https://monkey.grand-challenge.org/).  
+We are grateful for the [Baseline code](https://github.com/computationalpathologygroup/monkey-challenge) used as a starting point.
 
-This repository demonstrates how to train a Faster R-CNN model for lymphocyte detection in whole slide images (WSIs) using [WholeSlideData](https://github.com/ComputationalPathologyGroup/wholeslidedata) and [Detectron2](https://github.com/facebookresearch/detectron2). It includes a pipeline setup for creating patches from WSIs, preparing annotations, and training a customized Faster R-CNN model.
+---
 
-## What is the difference between our approach and baseline?
-image size: [96, 96] → [224, 224]  
-long training epoch 200 → 2000  
-large learning rate 200 → 2000  
-ensemble: none → wbf
+## Our Ensemble-Based Approach
 
+Instead of a single baseline model, we **train two models** that share the same baseline architecture but differ in **two key aspects**:
 
-## Main Libraries & Tools
+1. **Preprocessing Spacing**: 0.25 vs. 0.3  
+2. **Loss Function**: Focal + DIoU vs. L2 + CE  
 
+All other parameters and configurations remain identical between the two models. We then combine both models’ predictions via **Weighted Box Fusion (WBF)** for the final submission, aiming to capture more robust features and reduce overfitting.
+
+---
+
+## Training Overview
+
+This repository demonstrates how to train a Faster R-CNN model for cell detection in whole slide images (WSIs) using [WholeSlideData](https://github.com/ComputationalPathologyGroup/wholeslidedata) and [Detectron2](https://github.com/facebookresearch/detectron2). It includes a pipeline setup for creating patches, preparing annotations, and running customized training.
+
+### Main Libraries & Tools
 - **WholeSlideData**  
-  Handles patch sampling, annotation parsing, and data iteration for WSIs.
+  Handles patch sampling, annotation parsing, and data iteration.
 - **Detectron2**  
-  A flexible object detection library. Here we use a Faster R-CNN model from the [model_zoo](https://github.com/facebookresearch/detectron2/tree/main/configs).
+  A flexible object detection library with a range of predefined models.
 
 ---
 
@@ -56,14 +62,8 @@ wholeslidedata:
       detection_labels: ['lymphocytes']
 ```
 
-- **`batch_shape.batch_size`**: Number of patches per batch (10)  
-- **`batch_shape.shape`**: Size of each patch (256×256×3)  
-- **`point_sampler_name`**: Randomly samples patch locations  
-- **`patch_label_sampler.max_number_objects`**: Maximum objects per patch (1000)
-
 ### Detectron2 Config
-
-```python
+```
 cfg.merge_from_file(
     model_zoo.get_config_file("COCO-Detection/faster_rcnn_X_101_32x8d_FPN_3x.yaml")
 )
@@ -83,37 +83,28 @@ cfg.SOLVER.WARMUP_ITERS = 0
 cfg.SOLVER.GAMMA = 0.5
 ```
 
-- **Model**: `faster_rcnn_X_101_32x8d_FPN_3x`  
-- **ROI_HEADS.NUM_CLASSES**: Number of classes (1; for lymphocytes)  
-- **SOLVER.IMS_PER_BATCH**: Mini-batch size (10)  
-- **SOLVER.BASE_LR**: Initial learning rate (0.001)  
-- **SOLVER.MAX_ITER**: Maximum training iterations (2000)  
-- **SOLVER.STEPS**: Iteration milestones for LR decay (10, 100, 250)  
-- **ANCHOR_GENERATOR.SIZES**: Anchor sizes ([16, 24, 32])
 
 ---
 
-## Training Process
 
-1. **Batch Iterator Creation**  
-   The `create_batch_iterator` function from WholeSlideData generates patch data according to the `user_config`.
-
-2. **Model Configuration**  
-   The Detectron2 config (`cfg`) loads the Faster R-CNN architecture from the model zoo.
-
-3. **Trainer Execution**  
-   A `WholeSlideDectectron2Trainer` uses both the `cfg` and `user_config` to start the training process.
-
-4. **Output**  
-   - Logs, model checkpoints, and final model weights are saved in the specified `OUTPUT_DIR` (default: `./outputs`).
+### Training Process 
+1.	Batch Iterator Creation
+Generates patches from WSIs based on user_config.
+2.	Model Configuration
+Loads a Faster R-CNN architecture from Detectron2’s model zoo.
+3.	Trainer Execution
+Runs WholeSlideDectectron2Trainer to train the model.
+4.	Output
+Saves logs, checkpoints, and final weights in ./outputs.
 
 ---
-## Other useful scripts
-The folder `utils` contains other useful functions
-- `json_to_xml.py`: Script that converts the output json files from grand-challenge back to xml files compatible with ASAP
-There is also an optional `prob_cutoff` argument, that lets you filter out annotations with a threshold.
-Helpful for visualising your results in ASAP.
-- `plot_froc.py`: Script that plots the FROC curve from the metrics.json file generated by the evaluation script 
-(this is also available for download on grand-challenge for the validation set cases).
+
+### Other Useful Scripts
+
+In the utils folder, we provide:
+	•	json_to_xml.py: Converts Grand Challenge JSON results to ASAP-compatible XML.
+	•	plot_froc.py: Plots the FROC curve from metrics.json generated by the evaluation script.
+
+These help visualize and evaluate detection results.
 
 
